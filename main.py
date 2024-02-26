@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
 from threading import Thread
-## Llama-index == 0.9.36
 import torch
 from transformers import BitsAndBytesConfig
 from llama_index import VectorStoreIndex, StorageContext, Document, ServiceContext, PromptTemplate
@@ -13,10 +12,9 @@ from pinecone import Pinecone, PodSpec
 from datasets import load_dataset
 import os
 import random
+from typing import Optional
+from transformers import AutoTokenizer
 
-
-# model = AutoModelForCausalLM.from_pretrained("gpt2")
-# tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
 quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -56,8 +54,6 @@ llm = HuggingFaceLLM(
 
 )
 
-os.environ['PINECONE_API_KEY'] = 'ad2c4c6e-833e-4ef5-b9b1-eeca2b976564'
-
 pc = Pinecone(
     api_key = os.getenv('PINECONE_API_KEY')
     )
@@ -94,31 +90,31 @@ index = VectorStoreIndex.from_documents(
 
 query_engine = index.as_query_engine(streaming=True)
 
+
+tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-chat-hf')
+special_tokens = tokenizer.special_tokens_map
+
 app = FastAPI()
 
 
-
-async def generate():
-
+async def generate_response(message):
     streaming_response = query_engine.query(
-        "What did the author do growing up?",
+        message,
     )
-
     for text in streaming_response.response_gen:
-    # do something with text as they arrive.
-       yield text
-    # pass
-    # inputs = tokenizer(["An increasing sequence: one,"], return_tensors="pt")
-    # streamer = TextIteratorStreamer(tokenizer)
-    # generation_kwargs = dict(inputs, streamer=streamer, max_new_tokens=50)
-    # thread = Thread(target=model.generate, kwargs=generation_kwargs)
-    # thread.start()
-    # for new_text in streamer:
-    #     yield new_text
+        for special_token in special_tokens.values():
+            if special_token in text:
+                text = text.replace(special_token, "")
+        yield text
+
 
 @app.get("/stream")
-async def main():
-    return StreamingResponse(generate())
+async def stream(message: Optional[str] = None):
+    if message: 
+        return StreamingResponse(generate_response(message))
+    else:
+        return "No message recieved"
+    
 
 if __name__ == "__main__":
     import uvicorn
